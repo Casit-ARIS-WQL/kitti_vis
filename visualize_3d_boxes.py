@@ -9,7 +9,10 @@ KITTI 3D目标检测可视化脚本
     # 可视化单张图像
     python visualize_3d_boxes.py --image_id 000145
 
-    # 使用自定义标定文件
+    # 使用逐帧标定目录（默认即为 calib_gt）
+    python visualize_3d_boxes.py --calib_dir calib_gt
+
+    # 使用单个全局标定文件（优先级低于逐帧标定目录）
     python visualize_3d_boxes.py --calib calib/000145.txt
 
     # 指定输入输出目录
@@ -249,7 +252,13 @@ def main():
         "--calib",
         default=None,
         help="KITTI标定文件路径（可选，包含 P2 矩阵）；"
-             "若不提供，则使用内置默认P2矩阵",
+             "优先级低于 --calib_dir，高于内置默认P2矩阵",
+    )
+    parser.add_argument(
+        "--calib_dir",
+        default="calib_gt",
+        help="逐帧标定文件目录（默认: calib_gt）；"
+             "每帧将自动加载 <calib_dir>/<frame_id>.txt 中的 P2 矩阵",
     )
     parser.add_argument(
         "--image_id",
@@ -263,13 +272,11 @@ def main():
     )
     args = parser.parse_args()
 
-    # 确定P2矩阵
+    # 全局P2矩阵（当逐帧标定文件不可用时的后备）
+    global_P2 = None
     if args.calib:
-        P2 = parse_calib_file(args.calib)
-        print(f"使用标定文件中的 P2 矩阵: {args.calib}")
-    else:
-        P2 = DEFAULT_P2
-        print("未提供标定文件，使用内置默认 P2 矩阵（KITTI训练集典型值）")
+        global_P2 = parse_calib_file(args.calib)
+        print(f"使用标定文件中的全局 P2 矩阵: {args.calib}")
 
     os.makedirs(args.output_dir, exist_ok=True)
 
@@ -301,7 +308,19 @@ def main():
             print(f"  [警告] 找不到标注文件: {label_path}，跳过")
             continue
 
-        print(f"处理: {fid}")
+        # 优先使用逐帧标定文件，其次全局标定文件，最后内置默认值
+        frame_calib_path = os.path.join(args.calib_dir, fid + ".txt")
+        if os.path.exists(frame_calib_path):
+            P2 = parse_calib_file(frame_calib_path)
+            calib_source = f"逐帧标定 ({frame_calib_path})"
+        elif global_P2 is not None:
+            P2 = global_P2
+            calib_source = f"全局标定 ({args.calib})"
+        else:
+            P2 = DEFAULT_P2
+            calib_source = "内置默认 P2"
+
+        print(f"处理: {fid}  [{calib_source}]")
         visualize(image_path, label_path, output_path, P2, draw_2d=not args.no_2d)
 
     print("\n全部完成！")
